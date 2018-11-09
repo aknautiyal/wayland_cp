@@ -1030,6 +1030,33 @@ struct weston_backend {
 	struct weston_output *
 	(*create_output)(struct weston_compositor *compositor,
 			 const char *name);
+
+	/** Set the content-protection for an output
+	 *
+	 *
+	 * @param weston_output The output which needs content-protection.
+	 * @param enable Request for enable or disable the content-protection.
+	 * @param content_type Type of content-protection level required.
+	 *
+	 */
+
+	int (*set_output_cp)(struct weston_output *weston_output, int enable,
+			     int content_type);
+	/** Get the content-protection status for an output, given the
+	 * content-protection type.
+	 *
+	 *
+	 * @param weston_output The output for which content-protection needs
+	 * to be read.
+	 * @param enable Input argument to store the content-protection status.
+	 * @param content_type Type of content-protection level.
+	 *
+	 */
+
+	int (*get_output_cp)(struct weston_output *weston_output, bool *enable,
+			     int content_type);
+
+
 };
 
 /** Callback for saving calibration

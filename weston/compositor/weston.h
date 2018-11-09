@@ -91,6 +91,14 @@ text_backend_init(struct weston_compositor *ec);
 void
 text_backend_destroy(struct text_backend *text_backend);
 
+int32_t
+weston_get_cp(struct weston_compositor *compositor, bool *enable,
+	      int32_t content_type);
+
+int32_t
+weston_set_cp(struct weston_compositor *compositor, int enable,
+	      int32_t content_type);
+
 #ifdef  __cplusplus
 }
 #endif

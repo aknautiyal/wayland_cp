@@ -222,6 +222,10 @@ enum wdrm_connector_property {
 	WDRM_CONNECTOR_DPMS,
 	WDRM_CONNECTOR_CRTC_ID,
 	WDRM_CONNECTOR_NON_DESKTOP,
+	WDRM_CONNECTOR_CONTENT_PROTECTION,
+	WDRM_CONNECTOR_CONTENT_TYPE,
+	WDRM_CONNECTOR_CP_SRM,
+	WDRM_CONNECTOR_CP_DOWNSTREAM_INFO,
 	WDRM_CONNECTOR__COUNT
 };
 
@@ -248,6 +252,40 @@ static struct drm_property_enum_info dpms_state_enums[] = {
 	},
 };
 
+enum wdrm_content_protection_state {
+	WDRM_MODE_CONTENT_PROTECTION_UNDESIRED = 0,
+	WDRM_MODE_CONTENT_PROTECTION_DESIRED,
+	WDRM_MODE_CONTENT_PROTECTION_ENABLED,
+	WDRM_MODE_CONTENT_PROTECTION__COUNT
+};
+
+enum wdrm_cp_content_type_state {
+	WDRM_MODE_CP_CONTENT_TYPE0 = 0,
+	WDRM_MODE_CP_CONTENT_TYPE1,
+	WDRM_MODE_CP_CONTENT_TYPE__COUNT
+};
+
+static struct drm_property_enum_info content_protection_enums[] = {
+	[WDRM_MODE_CONTENT_PROTECTION_UNDESIRED] = {
+		.name = "Undesired",
+	},
+	[WDRM_MODE_CONTENT_PROTECTION_DESIRED] = {
+		.name = "Desired",
+	},
+	[WDRM_MODE_CONTENT_PROTECTION_ENABLED] = {
+		.name = "Enabled",
+	},
+};
+
+static struct drm_property_enum_info cp_content_type_enums[] = {
+	[WDRM_MODE_CP_CONTENT_TYPE0] = {
+		.name = "Type 0",
+	},
+	[WDRM_MODE_CP_CONTENT_TYPE1] = {
+		.name = "Type 1",
+	},
+};
+
 static const struct drm_property_info connector_props[] = {
 	[WDRM_CONNECTOR_EDID] = { .name = "EDID" },
 	[WDRM_CONNECTOR_DPMS] = {
@@ -257,6 +295,18 @@ static const struct drm_property_info connector_props[] = {
 	},
 	[WDRM_CONNECTOR_CRTC_ID] = { .name = "CRTC_ID", },
 	[WDRM_CONNECTOR_NON_DESKTOP] = { .name = "non-desktop", },
+	[WDRM_CONNECTOR_CONTENT_PROTECTION] = {
+		.name = "Content Protection",
+		.enum_values = content_protection_enums,
+		.num_enum_values = WDRM_MODE_CONTENT_PROTECTION__COUNT,
+	},
+	[WDRM_CONNECTOR_CONTENT_TYPE] = {
+		.name = "CP_Content_Type",
+		.enum_values = cp_content_type_enums,
+		.num_enum_values = WDRM_MODE_CP_CONTENT_TYPE__COUNT,
+	},
+	[WDRM_CONNECTOR_CP_SRM] = { .name = "CP_SRM", },
+	[WDRM_CONNECTOR_CP_DOWNSTREAM_INFO] = { .name = "CP_Downstream_Info", },
 };
 
 /**
@@ -288,6 +338,16 @@ enum drm_state_apply_mode {
 	DRM_STATE_APPLY_SYNC, /**< state fully processed */
 	DRM_STATE_APPLY_ASYNC, /**< state pending event delivery */
 	DRM_STATE_TEST_ONLY, /**< test if the state can be applied */
+};
+
+/**
+ * Structure to store the protection status and the type of protection.
+ * This can be used to collect the current status of the content-protection
+ * for a drm_head, or to collect the type of protection from the user.
+ */
+struct drm_content_protection_info {
+	enum wdrm_content_protection_state cp_status;
+	enum wdrm_cp_content_type_state cp_type;
 };
 
 struct drm_backend {
@@ -502,6 +562,9 @@ struct drm_head {
 
 	/* Holds the properties for the connector */
 	struct drm_property_info props_conn[WDRM_CONNECTOR__COUNT];
+
+	struct drm_content_protection_info cp_req_info;
+	int cp_request_pending;
 
 	struct backlight *backlight;
 
@@ -871,6 +934,7 @@ drm_output_destroy(struct weston_output *output_base);
 
 static void
 drm_virtual_output_destroy(struct weston_output *output_base);
+
 
 /**
  * Returns true if the plane can be used on the given output for its current
@@ -1852,6 +1916,7 @@ drm_pending_state_get_output(struct drm_pending_state *pending_state,
 
 static int drm_pending_state_apply_sync(struct drm_pending_state *state);
 static int drm_pending_state_test(struct drm_pending_state *state);
+static int drm_pending_state_apply(struct drm_pending_state *state);
 
 /**
  * Mark a drm_output_state (the output's last state) as complete. This handles
@@ -1865,6 +1930,7 @@ drm_output_update_complete(struct drm_output *output, uint32_t flags,
 	struct drm_backend *b = to_drm_backend(output->base.compositor);
 	struct drm_plane_state *ps;
 	struct timespec ts;
+	struct weston_head *weston_head;
 
 	/* Stop the pageflip timer instead of rearming it here */
 	if (output->pageflip_timer)
@@ -1901,6 +1967,11 @@ drm_output_update_complete(struct drm_output *output, uint32_t flags,
 		 * latter is true, then we cannot go through finish_frame,
 		 * because the repaint machinery does not expect this. */
 		return;
+	}
+	wl_list_for_each(weston_head, &output->base.head_list, output_link) {
+		struct drm_head *head = to_drm_head(weston_head);
+
+		head->cp_request_pending = 0;
 	}
 
 	ts.tv_sec = sec;
@@ -2519,6 +2590,37 @@ drm_output_apply_state_atomic(struct drm_output_state *state,
 		weston_log("couldn't set atomic CRTC/connector state\n");
 		return ret;
 	}
+	wl_list_for_each(head, &output->base.head_list, base.output_link) {
+
+		if (head->connector->connector_type != DRM_MODE_CONNECTOR_DisplayPort &&
+				head->connector->connector_type != DRM_MODE_CONNECTOR_HDMIA &&
+				head->connector->connector_type != DRM_MODE_CONNECTOR_HDMIB) {
+			weston_log("head %s doesn't need HDCP. Skip\n", head->base.name);
+			continue;
+		}
+
+		if (!head->base.connected) {
+			weston_log("Skip the Disconnected head %s\n", head->base.name);
+			continue;
+		}
+		if (head->cp_request_pending) {
+			int ret;
+
+			ret = connector_add_prop(req, head,
+					WDRM_CONNECTOR_CONTENT_PROTECTION,
+					head->cp_req_info.cp_status);
+			if (ret == -1)
+				weston_log("Failed to add CP Property = %d\n", head->cp_req_info.cp_status);
+			weston_log("set_hdcp::For head=%s,Add CP Property = %d\n", head->base.name, head->cp_req_info.cp_status);
+			ret = connector_add_prop(req, head,
+					WDRM_CONNECTOR_CONTENT_TYPE,
+					head->cp_req_info.cp_type);
+			if (ret == -1)
+				weston_log("Failed to add CP Type = %d\n", head->cp_req_info.cp_type);
+			weston_log("set_hdcp::For head=%s,Add CP type = %d\n", head->base.name, head->cp_req_info.cp_type);
+		}
+		*flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
+	}
 
 	wl_list_for_each(plane_state, &state->plane_list, link) {
 		struct drm_plane *plane = plane_state->plane;
@@ -2550,6 +2652,150 @@ drm_output_apply_state_atomic(struct drm_output_state *state,
 		}
 	}
 
+	return 0;
+}
+
+static void
+drm_head_log_info(struct drm_head *head, const char *msg);
+
+static int drm_head_get_cp(struct drm_head *head,
+			   struct drm_content_protection_info *cp_info)
+{
+	drmModeObjectProperties *props;
+	struct drm_property_info *info;
+
+	drm_head_log_info(head, "get_cp");
+
+	if (head->connector->connector_type != DRM_MODE_CONNECTOR_DisplayPort &&
+			head->connector->connector_type != DRM_MODE_CONNECTOR_HDMIA &&
+			head->connector->connector_type != DRM_MODE_CONNECTOR_HDMIB) {
+		weston_log("head %s doesn't need HDCP. Skip\n", head->base.name);
+		return -1;
+
+	}
+
+	if (!head->base.connected) {
+		weston_log("Skip the Disconnected head %s\n", head->base.name);
+		return -1;
+	}
+
+	props = drmModeObjectGetProperties(head->backend->drm.fd,
+			head->connector_id,
+			DRM_MODE_OBJECT_CONNECTOR);
+
+	drm_property_info_populate(head->backend, connector_props,
+			head->props_conn,
+			WDRM_CONNECTOR__COUNT, props);
+
+	info = &head->props_conn[WDRM_CONNECTOR_CONTENT_PROTECTION];
+	cp_info->cp_status = drm_property_get_value(info, props, -1);
+	info = &head->props_conn[WDRM_CONNECTOR_CONTENT_TYPE];
+	cp_info->cp_type = drm_property_get_value(info, props, -1);
+	drmModeFreeObjectProperties(props);
+	return 0;
+}
+
+int
+drm_output_get_cp(struct weston_output *weston_output, bool *cp_enabled,
+		  int content_type)
+{
+	struct drm_output *output = to_drm_output(weston_output);
+	struct weston_head *weston_head;
+	int cp, ct, ret;
+
+	weston_log("get cp: output: %s : Pipe: %d\n", weston_output->name, output->pipe);
+	assert(output->base.enabled);
+
+	wl_list_for_each(weston_head, &weston_output->head_list, output_link) {
+		struct drm_head *head = to_drm_head(weston_head);
+		struct drm_content_protection_info cp_info;
+
+		ret = drm_head_get_cp(head, &cp_info);
+		if (ret == -1)
+			continue;
+		cp = cp_info.cp_status;
+		ct = cp_info.cp_type;
+		if (cp == -1) {
+			weston_log("%s: content protection not supported\n",
+				  head->base.name);
+			return -1;
+		}
+
+		if (cp == WDRM_MODE_CONTENT_PROTECTION_ENABLED)
+			*cp_enabled = true;
+		else
+			*cp_enabled = false;
+
+		if (*cp_enabled == false) {
+			weston_log("cp disabled\n");
+			break;
+		}
+
+		if (ct == -1) {
+			weston_log("%s: content type %d not supported\n",
+				   head->base.name, content_type);
+			continue;
+		}
+
+		if (ct != content_type) {
+			weston_log("%s: CT is not matching with expectation\n",
+				  head->base.name);
+			*cp_enabled = false;
+			return -1;
+		}
+	}
+	return 0;
+}
+
+int drm_output_set_cp(struct weston_output *weston_output, int cp_req,
+			     int content_type)
+{
+	int ret;
+	struct drm_output *output = to_drm_output(weston_output);
+	struct weston_compositor *wc = weston_output->compositor;
+	struct drm_backend *b = to_drm_backend(wc);
+	struct weston_head *weston_head;
+	struct drm_pending_state *pending_state ;
+
+	assert(output->base.enabled);
+	if (cp_req < WDRM_MODE_CONTENT_PROTECTION_UNDESIRED ||
+	    cp_req > WDRM_MODE_CONTENT_PROTECTION__COUNT) {
+		weston_log("Incorrect Content-protection request\n");
+		return -1;
+	}
+
+	if (cp_req != WDRM_MODE_CONTENT_PROTECTION_UNDESIRED &&
+	    (content_type < WDRM_MODE_CP_CONTENT_TYPE0 ||
+	     content_type > WDRM_MODE_CP_CONTENT_TYPE__COUNT)) {
+		weston_log("Incorrect Content-Protection type request\n");
+		return -1;
+	}
+
+	wl_list_for_each(weston_head, &weston_output->head_list, output_link) {
+		struct drm_head *head = to_drm_head(weston_head);
+		if (head->connector->connector_type != DRM_MODE_CONNECTOR_DisplayPort &&
+			head->connector->connector_type != DRM_MODE_CONNECTOR_HDMIA &&
+			head->connector->connector_type != DRM_MODE_CONNECTOR_HDMIB) {
+			weston_log("head %s doesn't need HDCP. Skip\n", head->base.name);
+			continue;
+		}
+
+		if (!head->base.connected) {
+			weston_log("Skip the Disconnected head %s\n", head->base.name);
+			continue;
+		}
+		weston_log("set hdcp for head %s request=%d, type=%d\n", head->base.name, cp_req, content_type);
+
+		head->cp_request_pending = true;
+		head->cp_req_info.cp_status = cp_req;
+		head->cp_req_info.cp_type = content_type;
+	}
+	pending_state = drm_pending_state_alloc(b);
+	ret = drm_pending_state_apply(pending_state);
+	if (ret != 0) {
+		weston_log("drm_cp not set \n");
+		return -1;
+	}
 	return 0;
 }
 
@@ -6324,8 +6570,21 @@ drm_head_update_info(struct drm_head *head)
 	if (drm_head_assign_connector_info(head, connector) < 0)
 		drmModeFreeConnector(connector);
 
-	if (head->base.device_changed)
+	if (head->base.device_changed) {
 		drm_head_log_info(head, "updated");
+		/* For a hotplugged head, disable content-protection */
+		if (head->base.connected) {
+			struct drm_pending_state *pending_state;
+			int ret;
+
+			head->cp_request_pending = true;
+			head->cp_req_info.cp_status = WDRM_MODE_CONTENT_PROTECTION_UNDESIRED;
+			pending_state = drm_pending_state_alloc(head->backend);
+			ret = drm_pending_state_apply(pending_state);
+			if (ret < 0)
+				weston_log("CP Disable failed for hotplugged head:%s\n", head->base.name);
+		}
+	}
 }
 
 /**
@@ -6366,6 +6625,8 @@ drm_head_create(struct drm_backend *backend, uint32_t connector_id,
 	head->backend = backend;
 
 	head->backlight = backlight_init(drm_device, connector->connector_type);
+
+	head->cp_request_pending = 0;
 
 	if (drm_head_assign_connector_info(head, connector) < 0)
 		goto err_init;
@@ -7373,6 +7634,8 @@ drm_backend_create(struct weston_compositor *compositor,
 	b->base.repaint_flush = drm_repaint_flush;
 	b->base.repaint_cancel = drm_repaint_cancel;
 	b->base.create_output = drm_output_create;
+	b->base.get_output_cp = drm_output_get_cp;
+	b->base.set_output_cp = drm_output_set_cp;
 
 	weston_setup_vt_switch_bindings(compositor);
 

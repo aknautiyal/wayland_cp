@@ -1,0 +1,51 @@
+<protocol name="content_protection">
+	<copyright>
+	Copyright © 2018-2019 Intel Corporation
+	Permission is hereby granted, free of charge, to any person obtaining a
+	copy of this software and associated documentation files (the "Software"),
+	to deal in the Software without restriction, including without limitation
+	the rights to use, copy, modify, merge, publish, distribute, sublicense,
+	and/or sell copies of the Software, and to permit persons to whom the
+	Software is furnished to do so, subject to the following conditions:
+
+	The above copyright notice and this permission notice (including the next
+	paragraph) shall be included in all copies or substantial portions of the
+	Software.
+
+	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+	THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+	FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+	DEALINGS IN THE SOFTWARE.
+	</copyright>
+	<interface name="content_protection" version="1">
+		<description summary="application interface to enable/disable content protection"/>
+		<enum name="type">
+			<entry name="UNPROTECTED" value="-1" summary="Unprotected"/>
+			<entry name="0" value="0" summary="Type-0"/>
+			<entry name="1" value="1" summary="Type-1"/>
+		</enum>
+		<request name="desired">
+			<description summary="content protection is desired">
+				Content Protection is required by the application, for a given surface.
+			</description>
+			<arg name="content_type" type="int"/>
+		</request>
+		<request name="disable">
+			<description summary="disable content protection">
+				This disables the content-protection.
+			</description>
+		</request>
+		<event name="status_changed">
+			<description summary="An event to tell the client that there is a change in protection status">
+				This event is sent whenever there is a change in content protection.
+				The content protection status can be ON or OFF.
+				ON in case of the desired protection type is accepted on all connectors,
+				and Off in case of any of the connector content-protection property is changed from "enabled"
+			</description>
+			<arg name="status" type="int"/>
+		</event>
+	</interface>
+</protocol>

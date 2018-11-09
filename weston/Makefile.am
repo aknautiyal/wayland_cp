@@ -177,7 +177,9 @@ nodist_libweston_@LIBWESTON_MAJOR@_la_SOURCES =				\
 	protocol/input-timestamps-unstable-v1-protocol.c		\
 	protocol/input-timestamps-unstable-v1-server-protocol.h		\
 	protocol/weston-touch-calibration-protocol.c			\
-	protocol/weston-touch-calibration-server-protocol.h
+	protocol/weston-touch-calibration-server-protocol.h		\
+	protocol/content-protection-protocol.c			\
+	protocol/content-protection-server-protocol.h
 
 BUILT_SOURCES += $(nodist_libweston_@LIBWESTON_MAJOR@_la_SOURCES)
 
@@ -1058,6 +1060,31 @@ nodist_fullscreen_shell_la_SOURCES =			\
 BUILT_SOURCES += $(nodist_fullscreen_shell_la_SOURCES)
 endif
 
+if ENABLE_CONTENT_PROTECTION
+module_LTLIBRARIES += content_protection_server.la
+
+content_protection_server_la_CPPFLAGS =			\
+	-I$(top_builddir)/protocol		\
+	-I$(top_srcdir)/shared			\
+	-I$(top_builddir)/libweston		\
+	-I$(top_srcdir)/libweston		\
+	-DIN_WESTON
+
+content_protection_server_la_LDFLAGS = -module -avoid-version
+content_protection_server_la_LIBADD =			\
+	libweston-@LIBWESTON_MAJOR@.la		\
+	$(COMPOSITOR_LIBS)
+content_protection_server_la_CFLAGS = $(AM_CFLAGS) $(COMPOSITOR_CFLAGS)
+content_protection_server_la_SOURCES =			\
+	content_protection/content_protection_server.c	\
+	shared/helpers.h
+nodist_content_protection_server_la_SOURCES =			\
+	protocol/content-protection-protocol.c		\
+	protocol/content-protection-server-protocol.h
+
+BUILT_SOURCES += $(nodist_content_protection_server_la_SOURCES)
+endif
+
 if ENABLE_IVI_SHELL
 
 module_LTLIBRARIES +=				\
@@ -1607,7 +1634,8 @@ EXTRA_DIST +=					\
 	protocol/weston-test.xml		\
 	protocol/weston-touch-calibration.xml	\
 	protocol/ivi-application.xml		\
-	protocol/ivi-hmi-controller.xml
+	protocol/ivi-hmi-controller.xml		\
+	protocol/content-protection.xml
 
 #
 # manual test modules in tests subdirectory

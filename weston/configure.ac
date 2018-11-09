@@ -621,6 +621,13 @@ AC_ARG_ENABLE(ivi-shell,
 	      enable_ivi_shell=yes)
 AM_CONDITIONAL(ENABLE_IVI_SHELL, test "x$enable_ivi_shell" = "xyes")
 
+AC_ARG_ENABLE(content-protection,
+              AS_HELP_STRING([--disable-content-protection],
+                             [do not build content protection server plugin]),,
+	      enable_content_protection=yes)
+AM_CONDITIONAL(ENABLE_CONTENT_PROTECTION,
+	       test "x$enable_content_protection" = "xyes")
+
 AC_ARG_ENABLE(wcap-tools, [  --disable-wcap-tools],, enable_wcap_tools=yes)
 AM_CONDITIONAL(BUILD_WCAP_TOOLS, test x$enable_wcap_tools = xyes)
 if test x$enable_wcap_tools = xyes; then

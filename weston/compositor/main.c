@@ -518,6 +518,65 @@ out_free:
 	return NULL;
 }
 
+WL_EXPORT int weston_get_cp(struct weston_compositor *compositor,
+			    bool *enable, int content_type)
+{
+	struct weston_output *output;
+	struct weston_backend *be = compositor->backend;
+	int ret;
+
+	wl_list_for_each(output, &compositor->output_list, link) {
+		if (!be->get_output_cp)
+			return -EINVAL;
+
+		ret = be->get_output_cp(output, enable, content_type);
+		if (ret < 0) {
+			weston_log("Failed to get protection status from backend, ret = %d\n", ret);
+			return ret;
+		}
+
+		/*
+		 * Content-Protection needs to be enabled at all external digital
+		 * panels.
+		 * Even if Content-Protection fails at single output,
+		 * we consider that Content-Protection is not in place.
+		 */
+		if (!enable)
+			return 0;
+	}
+
+	weston_log("CP status: %sable. ", *enable ? "En" : "Dis");
+	if (enable)
+		weston_log("content_type : %d\n", content_type);
+
+	return 0;
+}
+
+WL_EXPORT int weston_set_cp(struct weston_compositor *compositor,
+			    int enable, int content_type)
+{
+	struct weston_output *output;
+	struct weston_backend *be = compositor->backend;
+	int ret;
+
+	weston_log("Setting CP : %sable ", enable ? "En" : "Dis");
+	if (enable)
+		weston_log("content_type : %d\n", content_type);
+
+	wl_list_for_each(output, &compositor->output_list, link) {
+		if (!be->set_output_cp)
+			return -EINVAL;
+
+		ret = be->set_output_cp(output, enable, content_type);
+		if (ret < 0) {
+			weston_log("Failed to set protection for the backend, ret =  %d\n", ret);
+			return ret;
+		}
+	}
+	return 0;
+}
+
+
 static void
 log_uname(void)
 {

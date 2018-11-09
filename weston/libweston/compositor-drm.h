@@ -225,6 +225,14 @@ struct weston_drm_backend_config {
 	bool use_pixman_shadow;
 };
 
+int
+drm_output_get_cp(struct weston_output *weston_output, bool *cp_enabled,
+		  int content_type);
+
+int
+drm_output_set_cp(struct weston_output *weston_output, int cp_req,
+		  int content_type);
+
 #ifdef  __cplusplus
 }
 #endif
